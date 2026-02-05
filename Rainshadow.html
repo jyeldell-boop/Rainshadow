@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Rain Shadow Simulation (Drag Cloud)</title>
+
+  <style>
+    body{
+      margin:0;
+      font-family: Arial, sans-serif;
+      /* ✅ Sky blue */
+      background: #7cc7ff;}
+
+    /* Top UI */
+    #uiBar{
+      position:absolute;
+      top:10px; left:10px; right:10px;
+      display:flex;
+      gap:12px;
+      align-items:center;
+      justify-content:space-between;
+      pointer-events:none;
+      z-index:10;
+    }
+    #card{
+      pointer-events:auto;
+      background: rgba(255,255,255,0.92);
+      border:1px solid rgba(0,0,0,0.08);
+      border-radius:12px;
+      padding:10px 12px;
+      max-width: 820px;
+      font-size:14px;
+      line-height:1.25;
+    }
+    #resetBtn{
+      pointer-events:auto;
+      background:#2d6cdf;
+      color:white;
+      border:none;
+      border-radius:10px;
+      padding:10px 14px;
+      font-weight:800;
+      cursor:pointer;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.15);
+    }
+    #resetBtn:active{ transform: translateY(1px); }
+
+    /* Wind arrow */
+    #windArrow{
+      pointer-events:none;
+      position:absolute;
+      top:78px; left:10px; right:10px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:10px;
+      color: rgba(0,0,0,0.65);
+      font-weight:800;
+      z-index:9;
+    }
+    #arrowLine{
+      width:min(560px, 72vw);
+      height:4px;
+      background: rgba(0,0,0,0.25);
+      border-radius:999px;
+      position:relative;
+      overflow:hidden;
+    }
+    #arrowLine::after{
+      content:"";
+      position:absolute;
+      top:0;
+      left:-25%;
+      width:25%;
+      height:100%;
+      background: rgba(45,108,223,0.55);
+      animation: blow 1.3s linear infinite;
+      border-radius:999px;
+    }
+    @keyframes blow{ from{ left:-25%; } to{ left:100%; } }
+    #arrowHead{
+      width:0;height:0;
+      border-top:10px solid transparent;
+      border-bottom:10px solid transparent;
+      border-left:16px solid rgba(0,0,0,0.45);
+    }
+
+    /* Cloud */
+    #cloud{
+      position:absolute;
+      top:115px; left:60px;
+      width:135px; height:88px;
+      background:#fff;
+      border-radius:60px;
+      box-shadow:
+        45px 5px 0 0 #fff,
+        25px -22px 0 0 #fff,
+        72px -10px 0 0 #fff;
+      cursor:grab;
+      transition: filter 0.25s ease;
+      z-index:6;
+    }
+    #cloud.raining{ filter: brightness(0.92) saturate(0.95); }
+
+    /* Rain */
+    #rainArea{
+      position:absolute;
+      width:190px;
+      height:280px;
+      display:none;
+      pointer-events:none;
+      overflow:hidden;
+      z-index:5;
+    }
+    .drop{
+      position:absolute;
+      top:-30px;
+      width:3px;
+      height:18px;
+      background: rgba(0,145,255,0.78);
+      border-radius:2px;
+      animation: fall linear infinite;
+    }
+    @keyframes fall{
+      from{ transform: translateY(0); opacity:0.9; }
+      to{ transform: translateY(320px); opacity:0.2; }
+    }
+
+    /* Mountain */
+    #mountainWrap{
+      position:absolute;
+      bottom:150px;
+      left:40%;
+      width:330px;
+      height:330px;
+      z-index:4;
+    }
+    #mountain{
+      position:absolute;
+      inset:0;
+      background: linear-gradient(to top, #6b6b6b, #b3b3b3);
+      clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+      filter: drop-shadow(0 6px 10px rgba(0,0,0,0.15));
+      z-index:1;
+    }
+
+    /* ✅ Windward (left) tint is hidden until cloud reaches mountain */
+    #mountainWindwardGreen{
+      position:absolute;
+      inset:0;
+      clip-path: polygon(50% 0%, 0% 100%, 50% 100%);
+      background: linear-gradient(to top, rgba(60,170,79,0.85), rgba(150,235,150,0.65));
+      opacity: 0;                 /* start hidden */
+      transition: opacity 0.5s ease;
+      pointer-events:none;
+      z-index:2;
+      mix-blend-mode:multiply;
+    }
+    #mountainWindwardGreen.show{
+      opacity: 0.55;              /* appears when triggered */
+    }
+
+    /* ✅ Leeward (right) slight grey tint always visible */
+    #mountainLeewardGrey{
+      position:absolute;
+      inset:0;
+      clip-path: polygon(50% 0%, 50% 100%, 100% 100%);
+      background: linear-gradient(to top, rgba(140,140,140,0.45), rgba(220,220,220,0.25));
+      opacity: 0.45;
+      pointer-events:none;
+      z-index:2;
+      mix-blend-mode:multiply;
+    }
+
+    /* ✅ Super simple labels */
+    #windwardLabel, #leewardLabel{
+      position:absolute;
+      width:120px;
+      text-align:center;
+      font-weight:900;
+      font-size:14px;
+      line-height:1.1;
+      padding:6px 8px;
+      border-radius:10px;
+      border: 1px solid rgba(0,0,0,0.10);
+      background: rgba(255,255,255,0.78);
+      color: rgba(0,0,0,0.78);
+      pointer-events:none;
+      z-index:4;
+    }
+    #windwardLabel{ left:18px; top:185px; }
+    #leewardLabel{ right:18px; top:185px; }
+
+    /* Mountain vegetation texture (optional extra “growth” look) */
+    #mountainVegCanvas{
+      position:absolute;
+      inset:0;
+      pointer-events:none;
+      z-index:3;
+      mix-blend-mode:multiply;
+    }
+
+    /* Ground */
+    #ground{
+      position:absolute;
+      left:0; bottom:0;
+      width:100vw;
+      height:150px;
+      background: linear-gradient(#d9c7a2, #c2a676);
+      border-top: 4px solid rgba(0,0,0,0.08);
+      z-index:3;
+    }
+    /* Ground vegetation canvas: becomes fully green behind cloud */
+    #groundVegCanvas{
+      position:absolute;
+      left:0; top:0;
+      width:100%;
+      height:100%;
+      pointer-events:none;
+      z-index:4;
+      mix-blend-mode:multiply;
+    }
+
+    /* Rainfall markers (hidden until AFTER cloud passes the whole mountain) */
+    #rainScale{
+      position:absolute;
+      left:0;
+      bottom:90px;
+      width:100vw;
+      height:56px;
+      display:flex;
+      gap:0;
+      font-size:13px;
+      font-weight:800;
+      color: rgba(0,0,0,0.72);
+      pointer-events:none;
+      z-index:7;
+
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+    #rainScale.show{ opacity:1; transform: translateY(0); }
+
+    .zone{
+      flex:1;
+      display:flex;
+      align-items:flex-end;
+      justify-content:center;
+      padding-bottom:8px;
+      position:relative;
+      border-right: 2px dashed rgba(0,0,0,0.18);
+    }
+    .zone:last-child{ border-right:none; }
+    .zoneLabel{
+      background: rgba(255,255,255,0.82);
+      border: 1px solid rgba(0,0,0,0.06);
+      padding:6px 10px;
+      border-radius:999px;
+    }
+    .ticks{
+      position:absolute;
+      left:0; right:0;
+      top:2px;
+      height:18px;
+      display:flex;
+      justify-content:space-evenly;
+      opacity:0.45;
+    }
+    .tick{
+      width:2px;
+      height:18px;
+      background: rgba(0,0,0,0.35);
+      border-radius:2px;
+    }
+
+    /* Results panel (hidden until cloud passes) */
+    #resultsPanel{
+      position:absolute;
+      left:12px;
+      bottom:12px;
+      width:min(470px, 92vw);
+      background: rgba(255,255,255,0.92);
+      border:1px solid rgba(0,0,0,0.08);
+      border-radius:14px;
+      padding:12px 14px;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+      display:none;
+      z-index:11;
+    }
+    #resultsTitle{ font-weight:900; margin-bottom:6px; }
+    .row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      margin:6px 0;
+      font-size:14px;
+    }
+    .badge{
+      padding:4px 10px;
+      border-radius:999px;
+      font-weight:900;
+      border:1px solid rgba(0,0,0,0.08);
+      background: rgba(0,0,0,0.03);
+    }
+    .wet{ background: rgba(111,207,111,0.25); }
+    .dry{ background: rgba(210,175,110,0.22); }
+
+    /* Leeward label */
+    #dryLabel{
+      position:absolute;
+      right:12px;
+      top:140px;
+      padding:10px 12px;
+      background: rgba(255,255,255,0.90);
+      border:1px solid rgba(0,0,0,0.08);
+      border-radius:12px;
+      font-size:14px;
+      max-width:260px;
+      display:none;
+      color:#8a6a00;
+      pointer-events:none;
+      z-index:10;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="uiBar">
+    <div id="card">
+      <b>Directions:</b> Click the cloud to start a small drizzle.<br>
+      Drag it toward the mountain. It rains <b>harder</b> on the windward side.<br>
+      <b>Green grows where rain falls.</b> Rain stops at the <b>top</b> (peak).<br>
+      After the cloud passes the mountain, you see <b>average rainfall totals</b> (inches).
+    </div>
+    <button id="resetBtn" type="button">Reset</button>
+  </div>
+
+  <div id="windArrow" aria-hidden="true">
+    <span>Wind</span>
+    <div id="arrowLine"></div>
+    <div id="arrowHead"></div>
+  </div>
+
+  <div id="cloud" aria-label="Draggable cloud"></div>
+  <div id="rainArea" aria-hidden="true"></div>
+
+  <div id="mountainWrap">
+    <div id="mountain"></div>
+
+    <div id="mountainWindwardGreen"></div>
+    <div id="mountainLeewardGrey"></div>
+
+    <div id="windwardLabel">WINDWARD<br>(WET)</div>
+    <div id="leewardLabel">LEEWARD<br>(DRY)</div>
+
+    <canvas id="mountainVegCanvas"></canvas>
+  </div>
+
+  <div id="dryLabel"><b>Rain Shadow:</b><br>Dry air sinks and warms here.</div>
+
+  <div id="resultsPanel" role="status" aria-live="polite">
+    <div id="resultsTitle">Average Rainfall (inches per year)</div>
+    <div class="row">
+      <span>Windward side (wet):</span>
+      <span class="badge wet"><span id="windwardIn">0</span> in</span>
+    </div>
+    <div class="row">
+      <span>Leeward side (dry):</span>
+      <span class="badge dry"><span id="leewardIn">0</span> in</span>
+    </div>
+    <div style="margin-top:6px; font-size:13px; color:rgba(0,0,0,0.65);">
+      The mountain blocks moisture. One side gets more rain.
+    </div>
+  </div>
+
+  <div id="ground">
+    <canvas id="groundVegCanvas"></canvas>
+
+    <div id="rainScale" aria-hidden="true">
+      <div class="zone" style="background: rgba(111,207,111,0.20);">
+        <div class="ticks"><div class="tick"></div><div class="tick"></div><div class="tick"></div><div class="tick"></div></div>
+        <div class="zoneLabel">WET (30–60 in)</div>
+      </div>
+      <div class="zone" style="background: rgba(255,255,255,0.10);">
+        <div class="ticks"><div class="tick"></div><div class="tick"></div><div class="tick"></div><div class="tick"></div></div>
+        <div class="zoneLabel">MEDIUM (15–30 in)</div>
+      </div>
+      <div class="zone" style="background: rgba(210,175,110,0.18);">
+        <div class="ticks"><div class="tick"></div><div class="tick"></div><div class="tick"></div><div class="tick"></div></div>
+        <div class="zoneLabel">DRY (0–15 in)</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const cloud = document.getElementById("cloud");
+    const rainArea = document.getElementById("rainArea");
+    const mountainWrap = document.getElementById("mountainWrap");
+    const resetBtn = document.getElementById("resetBtn");
+    const rainScale = document.getElementById("rainScale");
+    const dryLabel = document.getElementById("dryLabel");
+    const mountainWindwardGreen = document.getElementById("mountainWindwardGreen");
+
+    const resultsPanel = document.getElementById("resultsPanel");
+    const windwardInEl = document.getElementById("windwardIn");
+    const leewardInEl = document.getElementById("leewardIn");
+
+    // Canvases
+    const groundCanvas = document.getElementById("groundVegCanvas");
+    const mountainCanvas = document.getElementById("mountainVegCanvas");
+    const gctx = groundCanvas.getContext("2d");
+    const mctx = mountainCanvas.getContext("2d");
+
+    // Start position
+    const startPos = { left: 60, top: 115 };
+
+    // Drag state
+    let dragging = false;
+    let offsetX = 0, offsetY = 0;
+
+    // Rain state: "none" | "light" | "heavy"
+    let rainMode = "none";
+    let drizzleStarted = false;
+    let resultsShown = false;
+
+    // Hidden rainfall totals
+    let windwardRainIn = 0;
+    let lastTick = null;
+
+    // Ground becomes fully green behind cloud while raining
+    let groundGreenMaxX = null;
+
+    // Windward green overlay toggle
+    let windwardTintShown = false;
+
+    // --- Teacher controls ---
+    const LIGHT_RATE_IN_PER_SEC = 3;
+    const HEAVY_RATE_IN_PER_SEC = 14;
+    const WINDWARD_MAX_DISPLAY = 60;
+    const LEEWARD_RATIO = 0.25;
+
+    // Mountain vegetation “spray” speed (texture)
+    const LIGHT_PLANTS_PER_SEC = 14;
+    const HEAVY_PLANTS_PER_SEC = 48;
+    // ------------------------
+
+    function buildDrops(count, minDur, maxDur, minOpacity, maxOpacity) {
+      rainArea.innerHTML = "";
+      for (let i = 0; i < count; i++) {
+        const d = document.createElement("div");
+        d.className = "drop";
+        d.style.left = (Math.random() * 190) + "px";
+        d.style.animationDuration = (minDur + Math.random() * (maxDur - minDur)).toFixed(2) + "s";
+        d.style.animationDelay = (Math.random() * 0.8).toFixed(2) + "s";
+        d.style.opacity = (minOpacity + Math.random() * (maxOpacity - minOpacity)).toFixed(2);
+        d.style.height = (10 + Math.random() * 18).toFixed(0) + "px";
+        rainArea.appendChild(d);
+      }
+    }
+
+    function setRainMode(mode){
+      if (rainMode === mode) return;
+      rainMode = mode;
+
+      if (mode === "none") {
+        cloud.classList.remove("raining");
+        rainArea.style.display = "none";
+        lastTick = null;
+        return;
+      }
+
+      cloud.classList.add("raining");
+      rainArea.style.display = "block";
+      updateRainPosition();
+
+      if (mode === "light") buildDrops(26, 0.95, 1.35, 0.20, 0.45);
+      if (mode === "heavy") buildDrops(78, 0.55, 0.95, 0.35, 0.85);
+    }
+
+    function updateRainPosition() {
+      rainArea.style.left = (cloud.offsetLeft - 10) + "px";
+      rainArea.style.top  = (cloud.offsetTop + 70) + "px";
+    }
+
+    // Zones / thresholds
+    function inWindwardZone(cloudCenterX, mLeft, mWidth) {
+      const triggerLeft = mLeft - 50;
+      const triggerRight = mLeft + (mWidth * 0.45);
+      return (cloudCenterX >= triggerLeft && cloudCenterX <= triggerRight);
+    }
+    function peakX(mLeft, mWidth) { return mLeft + (mWidth / 2); }
+    function atOrPastPeak(cloudCenterX, mLeft, mWidth) { return cloudCenterX >= peakX(mLeft, mWidth); }
+    function passedMountain(cloudCenterX, mLeft, mWidth) {
+      const rightEdge = mLeft + mWidth;
+      return cloudCenterX > rightEdge + 10;
+    }
+
+    function resizeCanvases(){
+      const gr = groundCanvas.getBoundingClientRect();
+      groundCanvas.width = Math.round(gr.width);
+      groundCanvas.height = Math.round(gr.height);
+
+      const mr = mountainCanvas.getBoundingClientRect();
+      mountainCanvas.width = Math.round(mr.width);
+      mountainCanvas.height = Math.round(mr.height);
+
+      clearVegetation();
+    }
+
+    function clearVegetation(){
+      gctx.clearRect(0,0,groundCanvas.width, groundCanvas.height);
+      mctx.clearRect(0,0,mountainCanvas.width, mountainCanvas.height);
+      groundGreenMaxX = null;
+    }
+
+    // Ground becomes fully green behind cloud while raining
+    function revealGroundFullyBehindCloud(globalX){
+      const rect = groundCanvas.getBoundingClientRect();
+      let xLocal = globalX - rect.left;
+      xLocal = Math.max(0, Math.min(rect.width, xLocal));
+      const xCanvas = xLocal;
+
+      if (groundGreenMaxX === null) {
+        groundGreenMaxX = xCanvas;
+        return;
+      }
+      if (xCanvas <= groundGreenMaxX) return;
+
+      const start = groundGreenMaxX;
+      const end = xCanvas;
+      const h = groundCanvas.height;
+
+      const grad = gctx.createLinearGradient(0, 0, 0, h);
+      grad.addColorStop(0, "rgba(120, 220, 120, 0.75)");
+      grad.addColorStop(1, "rgba(58, 168, 79, 0.90)");
+
+      gctx.fillStyle = grad;
+      gctx.fillRect(start, 0, end - start, h);
+      groundGreenMaxX = end;
+    }
+
+    // Mountain vegetation texture (paint on windward half)
+    function paintMountainVegetation(globalX, amount){
+      const rect = mountainCanvas.getBoundingClientRect();
+      const xLocal = globalX - rect.left;
+      if (xLocal < 0 || xLocal > rect.width) return;
+
+      mctx.save();
+      // clip to windward triangle (left half)
+      mctx.beginPath();
+      mctx.moveTo(rect.width/2, 0);
+      mctx.lineTo(0, rect.height);
+      mctx.lineTo(rect.width/2, rect.height);
+      mctx.closePath();
+      mctx.clip();
+
+      for (let i = 0; i < amount; i++){
+        const spread = 50;
+        const x = xLocal + (Math.random() - 0.5) * spread;
+        const y = 70 + Math.random() * (rect.height - 110);
+        const r = 6 + Math.random() * 12;
+
+        const grad = mctx.createRadialGradient(x, y, 1, x, y, r);
+        grad.addColorStop(0, "rgba(45, 170, 75, 0.22)");
+        grad.addColorStop(1, "rgba(45, 170, 75, 0.00)");
+
+        mctx.fillStyle = grad;
+        mctx.beginPath();
+        mctx.arc(x, y, r, 0, Math.PI * 2);
+        mctx.fill();
+      }
+      mctx.restore();
+    }
+
+    function showResults() {
+      if (resultsShown) return;
+      resultsShown = true;
+
+      const wind = Math.max(0, Math.min(WINDWARD_MAX_DISPLAY, Math.round(windwardRainIn)));
+      const lee = Math.max(0, Math.min(15, Math.round(wind * LEEWARD_RATIO)));
+
+      rainScale.classList.add("show");
+      dryLabel.style.display = "block";
+
+      resultsPanel.style.display = "block";
+      animateCount(windwardInEl, 0, wind, 750);
+      animateCount(leewardInEl, 0, lee, 750);
+    }
+
+    function animateCount(el, from, to, ms) {
+      const start = performance.now();
+      function step(t){
+        const p = Math.min(1, (t - start) / ms);
+        el.textContent = Math.round(from + (to - from) * p);
+        if (p < 1) requestAnimationFrame(step);
+      }
+      requestAnimationFrame(step);
+    }
+
+    function updateLogic() {
+      const mLeft = mountainWrap.offsetLeft;
+      const mWidth = mountainWrap.offsetWidth;
+      const cCenterX = cloud.offsetLeft + cloud.offsetWidth / 2;
+
+      // ✅ Show windward green ONLY when cloud reaches windward zone
+      if (!windwardTintShown && inWindwardZone(cCenterX, mLeft, mWidth)) {
+        windwardTintShown = true;
+        mountainWindwardGreen.classList.add("show");
+      }
+
+      // Rain logic: click starts drizzle, heavy on windward, stop at peak
+      if (!drizzleStarted) {
+        setRainMode("none");
+      } else {
+        if (atOrPastPeak(cCenterX, mLeft, mWidth)) {
+          setRainMode("none");
+        } else if (inWindwardZone(cCenterX, mLeft, mWidth)) {
+          setRainMode("heavy");
+        } else {
+          setRainMode("light");
+        }
+      }
+
+      if (rainMode !== "none") updateRainPosition();
+
+      // Show totals only after passing mountain
+      if (passedMountain(cCenterX, mLeft, mWidth)) showResults();
+    }
+
+    // Main loop: count inches + grow vegetation while raining
+    function tick(now){
+      if (rainMode !== "none") {
+        if (lastTick === null) lastTick = now;
+        const dt = (now - lastTick) / 1000;
+        lastTick = now;
+
+        // rainfall inches (hidden until passing)
+        const rate = (rainMode === "heavy") ? HEAVY_RATE_IN_PER_SEC : LIGHT_RATE_IN_PER_SEC;
+        windwardRainIn = Math.min(90, windwardRainIn + dt * rate);
+
+        // rain x position
+        const rainGlobalX = cloud.offsetLeft + cloud.offsetWidth/2;
+
+        // ground becomes fully green behind cloud
+        revealGroundFullyBehindCloud(rainGlobalX);
+
+        // mountain texture paints while raining
+        const plantsPerSec = (rainMode === "heavy") ? HEAVY_PLANTS_PER_SEC : LIGHT_PLANTS_PER_SEC;
+        const blobs = Math.max(1, Math.round(plantsPerSec * dt));
+        paintMountainVegetation(rainGlobalX, Math.max(1, Math.round(blobs * 0.55)));
+      } else {
+        lastTick = null;
+      }
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+
+    // ✅ Drag events (cloud remains draggable)
+    cloud.addEventListener("mousedown", (e) => {
+      dragging = true;
+
+      // Click starts drizzle (light rain) immediately
+      drizzleStarted = true;
+
+      offsetX = e.clientX - cloud.offsetLeft;
+      offsetY = e.clientY - cloud.offsetTop;
+      cloud.style.cursor = "grabbing";
+
+      updateLogic();
+    });
+
+    document.addEventListener("mouseup", () => {
+      dragging = false;
+      cloud.style.cursor = "grab";
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+
+      cloud.style.left = (e.clientX - offsetX) + "px";
+      cloud.style.top  = (e.clientY - offsetY) + "px";
+
+      updateLogic();
+    });
+
+    // Reset
+    resetBtn.addEventListener("click", () => {
+      cloud.style.left = startPos.left + "px";
+      cloud.style.top  = startPos.top + "px";
+
+      drizzleStarted = false;
+      setRainMode("none");
+
+      windwardRainIn = 0;
+      lastTick = null;
+
+      resultsShown = false;
+      resultsPanel.style.display = "none";
+      windwardInEl.textContent = "0";
+      leewardInEl.textContent = "0";
+      rainScale.classList.remove("show");
+      dryLabel.style.display = "none";
+
+      clearVegetation();
+      buildDrops(26, 0.95, 1.35, 0.20, 0.45);
+
+      // reset windward green tint back to hidden
+      windwardTintShown = false;
+      mountainWindwardGreen.classList.remove("show");
+    });
+
+    window.addEventListener("load", () => {
+      resizeCanvases();
+      buildDrops(26, 0.95, 1.35, 0.20, 0.45); // initial drizzle look
+      updateLogic();
+    });
+    window.addEventListener("resize", () => {
+      resizeCanvases();
+      updateLogic();
+    });
+  </script>
+</body>
+</html>
